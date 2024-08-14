@@ -41,7 +41,7 @@ pub enum Action {
     OpaquePut = 11,
 
     // Actions that do not need to be packed as 4 bits in the state table
-    // Can have values higher than 16
+    // can have values higher than 16.
     Clear = 16,
     Hook = 17,
     Unhook = 18,
