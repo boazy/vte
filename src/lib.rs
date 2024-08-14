@@ -372,7 +372,7 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
             Action::Ignore => (),
             Action::None => (),
 
-            // APC Actions are checked last, since they are relatively rare
+            // APC Actions are checked last, since they are relatively rare.
             Action::OpaqueStart => {
                 let kind = match byte {
                     0x58 => OpaqueSequenceKind::Sos,
