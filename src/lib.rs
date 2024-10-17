@@ -90,6 +90,7 @@ pub struct Parser<const OSC_RAW_BUF_SIZE: usize = MAX_OSC_RAW> {
     osc_num_params: usize,
     ignoring: bool,
     utf8_parser: utf8::Parser,
+    opaque_sequence_kind: Option<OpaqueSequenceKind>,
 }
 
 impl Parser {
@@ -170,7 +171,7 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                     Action::None => (),
                     action => {
                         self.perform_action(performer, action, $arg);
-                    },
+                    }
                 }
             };
         }
@@ -179,18 +180,18 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
             State::Anywhere => {
                 // Just run the action
                 self.perform_action(performer, action, byte);
-            },
+            }
             state => {
                 match self.state {
                     State::DcsPassthrough => {
                         self.perform_action(performer, Action::Unhook, byte);
-                    },
+                    }
                     State::OscString => {
                         self.perform_action(performer, Action::OscEnd, byte);
-                    },
+                    }
                     State::OpaqueString => {
                         self.perform_action(performer, Action::OpaqueEnd, byte);
-                    },
+                    }
                     _ => (),
                 }
 
@@ -199,22 +200,22 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                 match state {
                     State::CsiEntry | State::DcsEntry | State::Escape => {
                         self.perform_action(performer, Action::Clear, byte);
-                    },
+                    }
                     State::DcsPassthrough => {
                         self.perform_action(performer, Action::Hook, byte);
-                    },
+                    }
                     State::OscString => {
                         self.perform_action(performer, Action::OscStart, byte);
-                    },
+                    }
                     State::OpaqueString => {
                         self.perform_action(performer, Action::OpaqueStart, byte);
-                    },
+                    }
                     _ => (),
                 }
 
                 // Assume the new state
                 self.state = state;
-            },
+            }
         }
     }
 
@@ -251,12 +252,12 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                 }
 
                 performer.hook(self.params(), self.intermediates(), self.ignoring, byte as char);
-            },
+            }
             Action::Put => performer.put(byte),
             Action::OscStart => {
                 self.osc_raw.clear();
                 self.osc_num_params = 0;
-            },
+            }
             Action::OscPut => {
                 #[cfg(feature = "no_std")]
                 {
@@ -277,21 +278,21 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                         // First param is special - 0 to current byte index
                         0 => {
                             self.osc_params[param_idx] = (0, idx);
-                        },
+                        }
 
                         // All other params depend on previous indexing
                         _ => {
                             let prev = self.osc_params[param_idx - 1];
                             let begin = prev.1;
                             self.osc_params[param_idx] = (begin, idx);
-                        },
+                        }
                     }
 
                     self.osc_num_params += 1;
                 } else {
                     self.osc_raw.push(byte);
                 }
-            },
+            }
             Action::OscEnd => {
                 let param_idx = self.osc_num_params;
                 let idx = self.osc_raw.len();
@@ -304,7 +305,7 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                     0 => {
                         self.osc_params[param_idx] = (0, idx);
                         self.osc_num_params += 1;
-                    },
+                    }
 
                     // All other params depend on previous indexing
                     _ => {
@@ -312,10 +313,10 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                         let begin = prev.1;
                         self.osc_params[param_idx] = (begin, idx);
                         self.osc_num_params += 1;
-                    },
+                    }
                 }
                 self.osc_dispatch(performer, byte);
-            },
+            }
             Action::Unhook => performer.unhook(),
             Action::CsiDispatch => {
                 if self.params.is_full() {
@@ -330,10 +331,10 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                     self.ignoring,
                     byte as char,
                 );
-            },
+            }
             Action::EscDispatch => {
                 performer.esc_dispatch(self.intermediates(), self.ignoring, byte);
-            },
+            }
             Action::Collect => {
                 if self.intermediate_idx == MAX_INTERMEDIATES {
                     self.ignoring = true;
@@ -341,7 +342,7 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                     self.intermediates[self.intermediate_idx] = byte;
                     self.intermediate_idx += 1;
                 }
-            },
+            }
             Action::Param => {
                 if self.params.is_full() {
                     self.ignoring = true;
@@ -359,7 +360,7 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                     self.param = self.param.saturating_mul(10);
                     self.param = self.param.saturating_add((byte - b'0') as u16);
                 }
-            },
+            }
             Action::Clear => {
                 // Reset everything on ESC/CSI/DCS entry
                 self.intermediate_idx = 0;
@@ -367,7 +368,7 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                 self.param = 0;
 
                 self.params.clear();
-            },
+            }
             Action::BeginUtf8 => self.process_utf8(performer, byte),
             Action::Ignore => (),
             Action::None => (),
@@ -385,10 +386,34 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                     // byte value, this branch is unreachable.
                     _ => unreachable!("invalid opaque sequence kind"),
                 };
-                performer.opaque_start(kind)
-            },
-            Action::OpaquePut => performer.opaque_put(byte),
-            Action::OpaqueEnd => performer.opaque_end(),
+                self.opaque_sequence_kind = Some(kind);
+                match kind {
+                    OpaqueSequenceKind::Sos => performer.sos_start(),
+                    OpaqueSequenceKind::Pm => performer.pm_start(),
+                    OpaqueSequenceKind::Apc => performer.apc_start(),
+                }
+            }
+            Action::OpaquePut => {
+                match self.opaque_sequence_kind {
+                    Some(OpaqueSequenceKind::Sos) => performer.sos_put(byte),
+                    Some(OpaqueSequenceKind::Pm) => performer.pm_put(byte),
+                    Some(OpaqueSequenceKind::Apc) => performer.apc_put(byte),
+                    // This action is only triggered inside the OpaqueString state, which requires
+                    // that the opaque_sequence_kind is set to a Some(x) value.
+                    None => unreachable!("opaque sequence kind not set"),
+                }
+            }
+            Action::OpaqueEnd => {
+                match self.opaque_sequence_kind {
+                    Some(OpaqueSequenceKind::Sos) => performer.sos_end(),
+                    Some(OpaqueSequenceKind::Pm) => performer.pm_end(),
+                    Some(OpaqueSequenceKind::Apc) => performer.apc_end(),
+                    // This action is only triggered inside the OpaqueString state, which requires
+                    // that the opaque_sequence_kind is set to a Some(x) value.
+                    None => unreachable!("opaque sequence kind not set"),
+                }
+                self.opaque_sequence_kind = None;
+            }
         }
     }
 }
@@ -445,8 +470,7 @@ pub trait Perform {
         _intermediates: &[u8],
         _ignore: bool,
         _action: char,
-    ) {
-    }
+    ) {}
 
     /// The final character of an escape sequence has arrived.
     ///
@@ -454,19 +478,41 @@ pub trait Perform {
     /// subsequent characters were ignored.
     fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, _byte: u8) {}
 
-    /// The start of an opaque sequence (SOS, PM or APC) has been detected.
+    /// The start of an SOS sequence has been detected.
     ///
-    /// The `kind` parameter indicates the type of sequence that was started.
+    /// Until the SOS sequence ends (at which point `sos_end` will be called), invalid
+    /// characters will be ignored while valid characters will be passed on to `sos_put`.
+    fn sos_start(&mut self) {}
+
+    /// A byte has been received as part of an ongoing SOS sequence.
+    fn sos_put(&mut self, _byte: u8) {}
+
+    /// We've reached the end of the ongoing SOS sequence.
+    fn sos_end(&mut self) {}
+
+    /// The start of a PM sequence has been detected.
     ///
-    /// Until the opaque sequence ends (at which point `opaque_end` will be called), invalid
-    /// characters will be ignored while valid characters will be passed on to `opaque_put`.
-    fn opaque_start(&mut self, _kind: OpaqueSequenceKind) {}
+    /// Until the PM sequence ends (at which point `pm_end` will be called), invalid
+    /// characters will be ignored while valid characters will be passed on to `pm_put`.
+    fn pm_start(&mut self) {}
 
-    /// We've reached the end of the ongoing opaque sequence (SOS, PM or APC).
-    fn opaque_end(&mut self) {}
+    /// A byte has been received as part of an ongoing PM sequence.
+    fn pm_put(&mut self, _byte: u8) {}
 
-    /// A byte has been received as part of an ongoing opaque sequence.
-    fn opaque_put(&mut self, _byte: u8) {}
+    /// We've reached the end of the ongoing PM sequence.
+    fn pm_end(&mut self) {}
+
+    /// The start of an APC sequence has been detected.
+    ///
+    /// Until the APC sequence ends (at which point `apc_end` will be called), invalid
+    /// characters will be ignored while valid characters will be passed on to `apc_put`.
+    fn apc_start(&mut self) {}
+
+    /// A byte has been received as part of an ongoing APC sequence.
+    fn apc_put(&mut self, _byte: u8) {}
+
+    /// We've reached the end of the ongoing APC sequence.
+    fn apc_end(&mut self) {}
 }
 
 #[cfg(all(test, feature = "no_std"))]
@@ -499,9 +545,15 @@ mod tests {
         DcsHook(Vec<Vec<u16>>, Vec<u8>, bool, char),
         DcsPut(u8),
         DcsUnhook,
-        OpaqueStart(OpaqueSequenceKind),
-        OpaquePut(u8),
-        OpaqueEnd,
+        SosStart,
+        SosPut(u8),
+        SosEnd,
+        PmStart,
+        PmPut(u8),
+        PmEnd,
+        ApcStart,
+        ApcPut(u8),
+        ApcEnd,
     }
 
     impl Perform for Dispatcher {
@@ -535,16 +587,40 @@ mod tests {
             self.dispatched.push(Sequence::DcsUnhook);
         }
 
-        fn opaque_start(&mut self, _kind: OpaqueSequenceKind) {
-            self.dispatched.push(Sequence::OpaqueStart(_kind));
+        fn sos_start(&mut self) {
+            self.dispatched.push(Sequence::SosStart);
         }
 
-        fn opaque_put(&mut self, byte: u8) {
-            self.dispatched.push(Sequence::OpaquePut(byte));
+        fn sos_put(&mut self, byte: u8) {
+            self.dispatched.push(Sequence::SosPut(byte));
         }
 
-        fn opaque_end(&mut self) {
-            self.dispatched.push(Sequence::OpaqueEnd);
+        fn sos_end(&mut self) {
+            self.dispatched.push(Sequence::SosEnd);
+        }
+
+        fn pm_start(&mut self) {
+            self.dispatched.push(Sequence::PmStart);
+        }
+
+        fn pm_put(&mut self, byte: u8) {
+            self.dispatched.push(Sequence::PmPut(byte));
+        }
+
+        fn pm_end(&mut self) {
+            self.dispatched.push(Sequence::PmEnd);
+        }
+
+        fn apc_start(&mut self) {
+            self.dispatched.push(Sequence::ApcStart);
+        }
+
+        fn apc_put(&mut self, byte: u8) {
+            self.dispatched.push(Sequence::ApcPut(byte));
+        }
+
+        fn apc_end(&mut self) {
+            self.dispatched.push(Sequence::ApcEnd);
         }
     }
 
@@ -563,7 +639,7 @@ mod tests {
                 assert_eq!(params.len(), 2);
                 assert_eq!(params[0], &OSC_BYTES[2..3]);
                 assert_eq!(params[1], &OSC_BYTES[4..(OSC_BYTES.len() - 1)]);
-            },
+            }
             _ => panic!("expected osc sequence"),
         }
     }
@@ -600,7 +676,7 @@ mod tests {
             Sequence::Osc(params, _) => {
                 assert_eq!(params.len(), MAX_OSC_PARAMS);
                 assert!(params.iter().all(Vec::is_empty));
-            },
+            }
             _ => panic!("expected osc sequence"),
         }
     }
@@ -658,7 +734,7 @@ mod tests {
             Sequence::Osc(params, _) => {
                 assert_eq!(params[0], &[b'2']);
                 assert_eq!(params[1], &INPUT[5..(INPUT.len() - 1)]);
-            },
+            }
             _ => panic!("expected osc sequence"),
         }
     }
@@ -677,9 +753,53 @@ mod tests {
         match &dispatcher.dispatched[0] {
             Sequence::Osc(params, _) => {
                 assert_eq!(params[1], &INPUT[4..(INPUT.len() - 2)]);
-            },
+            }
             _ => panic!("expected osc sequence"),
         }
+    }
+
+    #[test]
+    fn parse_sos() {
+        const INPUT: &[u8] = b"\x1bXabc\x1b\\";
+
+        // Test with ESC \ terminator.
+
+        let mut dispatcher = Dispatcher::default();
+        let mut parser = Parser::new();
+
+        for byte in INPUT {
+            parser.advance(&mut dispatcher, *byte);
+        }
+        assert_eq!(dispatcher.dispatched.len(), 6);
+        assert_eq!(dispatcher.dispatched[0..5], vec![
+            Sequence::SosStart,
+            Sequence::SosPut(b'a'),
+            Sequence::SosPut(b'b'),
+            Sequence::SosPut(b'c'),
+            Sequence::SosEnd,
+        ])
+    }
+
+    #[test]
+    fn parse_pm() {
+        const INPUT: &[u8] = b"\x1b^abc\x1b\\";
+
+        // Test with ESC \ terminator.
+
+        let mut dispatcher = Dispatcher::default();
+        let mut parser = Parser::new();
+
+        for byte in INPUT {
+            parser.advance(&mut dispatcher, *byte);
+        }
+        assert_eq!(dispatcher.dispatched.len(), 6);
+        assert_eq!(dispatcher.dispatched[0..5], vec![
+            Sequence::PmStart,
+            Sequence::PmPut(b'a'),
+            Sequence::PmPut(b'b'),
+            Sequence::PmPut(b'c'),
+            Sequence::PmEnd,
+        ])
     }
 
     #[test]
@@ -696,11 +816,11 @@ mod tests {
         }
         assert_eq!(dispatcher.dispatched.len(), 6);
         assert_eq!(dispatcher.dispatched[0..5], vec![
-            Sequence::OpaqueStart(OpaqueSequenceKind::Apc),
-            Sequence::OpaquePut(b'a'),
-            Sequence::OpaquePut(b'b'),
-            Sequence::OpaquePut(b'c'),
-            Sequence::OpaqueEnd,
+            Sequence::ApcStart,
+            Sequence::ApcPut(b'a'),
+            Sequence::ApcPut(b'b'),
+            Sequence::ApcPut(b'c'),
+            Sequence::ApcEnd,
         ])
     }
 
@@ -739,7 +859,7 @@ mod tests {
 
                 #[cfg(feature = "no_std")]
                 assert_eq!(params[1].len(), MAX_OSC_RAW - params[0].len());
-            },
+            }
             _ => panic!("expected osc sequence"),
         }
     }
@@ -764,7 +884,7 @@ mod tests {
             Sequence::Csi(params, _, ignore, _) => {
                 assert_eq!(params.len(), params::MAX_PARAMS);
                 assert!(!ignore);
-            },
+            }
             _ => panic!("expected csi sequence"),
         }
     }
@@ -789,7 +909,7 @@ mod tests {
             Sequence::Csi(params, _, ignore, _) => {
                 assert_eq!(params.len(), params::MAX_PARAMS);
                 assert!(ignore);
-            },
+            }
             _ => panic!("expected csi sequence"),
         }
     }
@@ -861,7 +981,7 @@ mod tests {
                 assert_eq!(intermediates, &[b'?']);
                 assert_eq!(params, &[[1049]]);
                 assert!(!ignore);
-            },
+            }
             _ => panic!("expected csi sequence"),
         }
     }
@@ -882,7 +1002,7 @@ mod tests {
                 assert_eq!(params, &[vec![38, 2, 255, 0, 255], vec![1]]);
                 assert_eq!(intermediates, &[]);
                 assert!(!ignore);
-            },
+            }
             _ => panic!("expected csi sequence"),
         }
     }
@@ -904,7 +1024,7 @@ mod tests {
                 assert_eq!(params.len(), params::MAX_PARAMS);
                 assert!(params.iter().all(|param| param == &[1]));
                 assert!(ignore);
-            },
+            }
             _ => panic!("expected dcs sequence"),
         }
     }
@@ -925,7 +1045,7 @@ mod tests {
                 assert_eq!(intermediates, &[b'$']);
                 assert_eq!(params, &[[1]]);
                 assert!(!ignore);
-            },
+            }
             _ => panic!("expected dcs sequence"),
         }
         assert_eq!(dispatcher.dispatched[1], Sequence::DcsPut(b'x'));
@@ -947,7 +1067,7 @@ mod tests {
             Sequence::DcsHook(params, _, _, c) => {
                 assert_eq!(params, &[[0], [1]]);
                 assert_eq!(c, &'|');
-            },
+            }
             _ => panic!("expected dcs sequence"),
         }
         for (i, byte) in b"17/ab".iter().enumerate() {
@@ -989,7 +1109,7 @@ mod tests {
                 assert_eq!(intermediates, &[b'(']);
                 assert_eq!(*byte, b'A');
                 assert!(!ignore);
-            },
+            }
             _ => panic!("expected esc sequence"),
         }
     }
@@ -1011,7 +1131,7 @@ mod tests {
                 assert_eq!(params, &[[0; 32]]);
                 assert_eq!(c, &'x');
                 assert!(ignore);
-            },
+            }
             _ => panic!("expected csi sequence"),
         }
     }
@@ -1033,7 +1153,7 @@ mod tests {
                 assert_eq!(intermediates, &[b'?']);
                 assert_eq!(params, &[[1049]]);
                 assert!(!ignore);
-            },
+            }
             _ => panic!("expected csi sequence"),
         }
     }
@@ -1073,7 +1193,7 @@ mod tests {
                 for item in params[1].iter() {
                     assert_eq!(*item, b'a');
                 }
-            },
+            }
             _ => panic!("expected osc sequence"),
         }
     }
@@ -1103,7 +1223,7 @@ mod tests {
             Sequence::Osc(params, false) => {
                 assert_eq!(params[0], b"2");
                 assert_eq!(params[1], INPUT_MIDDLE);
-            },
+            }
             _ => panic!("expected osc sequence"),
         }
     }
