@@ -376,9 +376,18 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
             // APC Actions are checked last, since they are relatively rare.
             Action::OpaqueStart => {
                 let kind = match byte {
-                    0x58 => OpaqueSequenceKind::Sos,
-                    0x5e => OpaqueSequenceKind::Pm,
-                    0x5f => OpaqueSequenceKind::Apc,
+                    0x58 => {
+                        performer.sos_start();
+                        OpaqueSequenceKind::Sos
+                    },
+                    0x5e => {
+                        performer.pm_start();
+                        OpaqueSequenceKind::Pm
+                    },
+                    0x5f => {
+                        performer.apc_start();
+                        OpaqueSequenceKind::Apc
+                    },
 
                     // Changes to OpaqueString state which trigger this action are only possible
                     // when one of the escape sequences above is detected (see Escape state changes
@@ -387,11 +396,6 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                     _ => unreachable!("invalid opaque sequence kind"),
                 };
                 self.opaque_sequence_kind = Some(kind);
-                match kind {
-                    OpaqueSequenceKind::Sos => performer.sos_start(),
-                    OpaqueSequenceKind::Pm => performer.pm_start(),
-                    OpaqueSequenceKind::Apc => performer.apc_start(),
-                }
             },
             Action::OpaquePut => {
                 match self.opaque_sequence_kind {
@@ -961,7 +965,7 @@ mod tests {
 
         assert_eq!(dispatcher.dispatched.len(), 1);
         match &dispatcher.dispatched[0] {
-            Sequence::Csi(params, ..) => assert_eq!(params, &[[std::u16::MAX as u16]]),
+            Sequence::Csi(params, ..) => assert_eq!(params, &[[std::u16::MAX]]),
             _ => panic!("expected csi sequence"),
         }
     }
